@@ -2,24 +2,24 @@ import Foundation
 import CryptoKit
 
 public class S3SignerAWS  {
-    
+
     /// AWS Access Key
     private let accessKey: String
-    
+
     /// The region where S3 bucket is located.
     public let region: Region
-    
+
     /// AWS Secret Key
     private let secretKey: String
-    
+
     /// AWS Security Token. Used to validate temporary credentials, such as those from an EC2 Instance's IAM role
     private let securityToken : String? //
-    
+
     /// The service used in calculating the signature. Currently limited to s3, possible expansion to other services after testing.
     internal var service: String {
         return "s3"
     }
-    
+
     /// Initializes a signer which works for either permanent credentials or temporary secrets
     ///
     /// - Parameters:
@@ -30,14 +30,13 @@ public class S3SignerAWS  {
     public init(accessKey: String,
                 secretKey: String,
                 region: Region,
-                securityToken: String? = nil)
-    {
+                securityToken: String? = nil) {
         self.accessKey = accessKey
         self.secretKey = secretKey
         self.region = region
         self.securityToken = securityToken
     }
-    
+
     /// Generate a V4 auth header for aws Requests.
     ///
     /// - Parameters:
@@ -50,53 +49,50 @@ public class S3SignerAWS  {
     ///			- if PUT and pathExtension is available, Content-Type
     ///			- if PUT and not unsigned, Content-md5
     /// - Throws: S3SignerError
-    public func authHeaderV4(
-        httpMethod: HTTPMethod,
-        urlString: String,
-        headers: [String: String] = [:],
-        payload: Payload)
-        throws -> [String:String]
-    {
+    public func authHeaderV4(httpMethod: HTTPMethod,
+                             urlString: String,
+                             headers: [String: String] = [:],
+                             payload: Payload) throws -> [String:String] {
         guard let url = URL(string: urlString) else {
             throw S3SignerError.badURL
         }
-        
-        let dates = getDates(date: Date())
-        
+
+        let dates = Dates(date: Date())
+
         let bodyDigest = try payload.hashed()
-        
+
         var updatedHeaders = updateHeaders(
             headers: headers,
             url: url,
             longDate: dates.long,
             bodyDigest: bodyDigest)
-        
+
         if httpMethod == .put && payload.isData {
             updatedHeaders["content-md5"] = Data(Insecure.MD5.hash(data: [UInt8](payload.data))).base64EncodedString()
         }
-        
+
         updatedHeaders["Authorization"] = try generateAuthHeader(
             httpMethod: httpMethod,
             url: url,
             headers: updatedHeaders,
             bodyDigest: bodyDigest,
             dates: dates)
-        
+
         if httpMethod == .put {
             updatedHeaders["Content-Length"] = payload.size()
-            
+
             if url.pathExtension != "" {
                 updatedHeaders["Content-Type"] = url.pathExtension
             }
         }
-        
+
         if payload.isUnsigned {
             updatedHeaders["x-amz-content-sha256"] = bodyDigest
         }
-        
+
         return updatedHeaders
     }
-    
+
     /// Generate a V4 pre-signed URL
     ///
     /// - Parameters:
@@ -106,53 +102,45 @@ public class S3SignerAWS  {
     ///   - headers: Any additional headers to be included with signature calculation.
     /// - Returns: Pre-signed URL string.
     /// - Throws: S3SignerError
-    public func presignedURLV4(
-        httpMethod: HTTPMethod,
-        urlString: String,
-        expiration: TimeFromNow,
-        headers: [String:String])
-        throws -> String
-    {
+    public func presignedURLV4(httpMethod: HTTPMethod,
+                               urlString: String,
+                               expiration: TimeFromNow,
+                               headers: [String: String]) throws -> String {
+
         guard let url = URL(string: urlString) else {
             throw S3SignerError.badURL
         }
-        
-        let dates = getDates(date: Date())
-        
+
+        let dates = Dates(date: Date())
+
         var updatedHeaders = headers
-        
+
         updatedHeaders["Host"] = url.host ?? region.host
-        
+
         let (canonRequest, fullURL) = try presignedURLCanonRequest(httpMethod: httpMethod, dates: dates, expiration: expiration, url: url, headers: updatedHeaders)
-        
+
         let stringToSign = try createStringToSign(canonicalRequest: canonRequest, dates: dates)
-        
+
         let signature = try createSignature(stringToSign: stringToSign, timeStampShort: dates.short)
-        
+
         return fullURL.absoluteString.appending("&X-Amz-Signature=\(signature)")
     }
-    
-    internal func canonicalHeaders(
-        headers: [String: String])
-        -> String
-    {
+
+    internal func canonicalHeaders(headers: [String: String]) -> String {
         let headerList = Array(headers.keys)
             .map { "\($0.lowercased()):\(headers[$0]!)" }
             .filter { $0 != "authorization" }
             .sorted(by: { $0.localizedCompare($1) == ComparisonResult.orderedAscending })
             .joined(separator: "\n")
             .appending("\n")
-        
+
         return headerList
     }
-    
-    internal func createCanonicalRequest(
-        httpMethod: HTTPMethod,
-        url: URL,
-        headers: [String: String],
-        bodyDigest: String)
-        throws -> String
-    {
+
+    internal func createCanonicalRequest(httpMethod: HTTPMethod,
+                                         url: URL,
+                                         headers: [String: String],
+                                         bodyDigest: String) throws -> String {
         return try [
             httpMethod.rawValue,
             path(url: url),
@@ -160,9 +148,9 @@ public class S3SignerAWS  {
             canonicalHeaders(headers: headers),
             signedHeaders(headers: headers),
             bodyDigest
-            ].joined(separator: "\n")
+        ].joined(separator: "\n")
     }
-    
+
     /// Create signature
     ///
     /// - Parameters:
@@ -170,29 +158,25 @@ public class S3SignerAWS  {
     ///   - timeStampShort: Short timestamp.
     /// - Returns: Signature.
     /// - Throws: HMAC error.
-    internal func createSignature(
-        stringToSign: String,
-        timeStampShort: String)
-        throws -> String
-    {
+    internal func createSignature(stringToSign: String, timeStampShort: String) throws -> String {
         let dateKey = hmacSign(data: timeStampShort, key: Data("AWS4\(secretKey)".utf8))
         let dateRegionKey = hmacSign(data: region.value, key: dateKey)
         let dateRegionServiceKey = hmacSign(data: service, key: dateRegionKey)
         let signingKey = hmacSign(data: "aws4_request", key: dateRegionServiceKey)
         let signature = hmacSign(data: stringToSign, key: signingKey)
-        
+
         return signature.hexEncodedString()
     }
-    
+
     func hmacSign(data: String, key: Data) -> Data {
         let stringToSign = data.data(using: .utf8) ?? Data()
         let key = SymmetricKey(data: key)
         let hash = HMAC<SHA256>.authenticationCode(for: stringToSign,
                                                    using: key)
-        
+
         return Data(hash)
     }
-    
+
     /// Create the String To Sign portion of signature.
     ///
     /// - Parameters:
@@ -200,11 +184,8 @@ public class S3SignerAWS  {
     ///   - dates: The dates object containing short and long timestamps of request.
     /// - Returns: String to sign.
     /// - Throws: If hashing canonical request fails.
-    internal func createStringToSign(
-        canonicalRequest: String,
-        dates: Dates)
-        throws -> String
-    {
+    internal func createStringToSign(canonicalRequest: String,
+                                     dates: Dates) throws -> String {
         let canonRequestHash = [UInt8](Data(SHA256.hash(data: [UInt8](canonicalRequest.utf8)))).hexEncodedString()
         return ["AWS4-HMAC-SHA256",
                 dates.long,
@@ -212,22 +193,19 @@ public class S3SignerAWS  {
                 canonRequestHash]
             .joined(separator: "\n")
     }
-    
+
     /// Credential scope
     ///
     /// - Parameter timeStampShort: Short timestamp.
     /// - Returns: Credential Scope.
-    private func credentialScope(
-        timeStampShort: String)
-        -> String
-    {
-        return  [
+    private func credentialScope(timeStampShort: String) -> String {
+        [
             timeStampShort,
             region.value,
             service, "aws4_request"
-            ].joined(separator: "/")
+        ].joined(separator: "/")
     }
-    
+
     /// Generate Auth Header for V4 Authorization Header request.
     ///
     /// - Parameters:
@@ -238,28 +216,17 @@ public class S3SignerAWS  {
     ///   - dates: The short and long timestamps of time of request.
     /// - Returns: Authorization header value.
     /// - Throws: S3SignerError
-    internal func generateAuthHeader(
-        httpMethod: HTTPMethod,
-        url: URL,
-        headers: [String:String],
-        bodyDigest: String,
-        dates: Dates)
-        throws -> String
-    {
+    internal func generateAuthHeader(httpMethod: HTTPMethod,
+                                     url: URL,
+                                     headers: [String:String],
+                                     bodyDigest: String,
+                                     dates: Dates) throws -> String {
         let canonicalRequestHex = try createCanonicalRequest(httpMethod: httpMethod, url: url, headers: headers, bodyDigest: bodyDigest)
         let stringToSign = try createStringToSign(canonicalRequest: canonicalRequestHex, dates: dates)
         let signature = try createSignature(stringToSign: stringToSign, timeStampShort: dates.short)
         return "AWS4-HMAC-SHA256 Credential=\(accessKey)/\(credentialScope(timeStampShort: dates.short)), SignedHeaders=\(signedHeaders(headers: headers)), Signature=\(signature)"
     }
-    
-    /// Instantiate Dates object containing the required date formats needed for signature calculation.
-    ///
-    /// - Parameter date: The date of request.
-    /// - Returns: Dates object.
-    internal func getDates(date: Date) -> Dates {
-        return Dates(date: date)
-    }
-    
+
     /// The percent encoded path of request URL.
     ///
     /// - Parameter url: The URL of request.
@@ -271,7 +238,7 @@ public class S3SignerAWS  {
         }
         return "/"
     }
-    
+
     /// The canonical request for Presigned URL requests.
     ///
     /// - Parameters:
@@ -282,21 +249,18 @@ public class S3SignerAWS  {
     ///   - headers: Headers used to sign and add to presigned URL.
     /// - Returns: Canonical request for pre-signed URL.
     /// - Throws: S3SignerError
-    internal func presignedURLCanonRequest(
-        httpMethod: HTTPMethod,
-        dates: Dates,
-        expiration: TimeFromNow,
-        url: URL,
-        headers: [String: String])
-        throws -> (String, URL)
-    {
+    internal func presignedURLCanonRequest(httpMethod: HTTPMethod,
+                                           dates: Dates,
+                                           expiration: TimeFromNow,
+                                           url: URL,
+                                           headers: [String: String]) throws -> (String, URL) {
         let credScope = credentialScope(timeStampShort: dates.short)
         let signHeaders = signedHeaders(headers: headers)
 
         guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             throw S3SignerError.badURL
         }
-        
+
         let defaultParams: [(name: String, value: String)] = [
             ("X-Amz-Algorithm", "AWS4-HMAC-SHA256"),
             ("X-Amz-Credential", "\(accessKey)/\(credScope)"),
@@ -308,7 +272,7 @@ public class S3SignerAWS  {
         components.queryItems = ((components.queryItems ?? []) + defaultParams.map { URLQueryItem(name: $0.name, value: $0.value) })
             .sorted(by: { $0.name < $1.name })
 
-        // This should never throw. 
+        // This should never throw.
         guard let url =  components.url else {
             throw S3SignerError.badURL
         }
@@ -328,10 +292,10 @@ public class S3SignerAWS  {
                 canonicalHeaders(headers: headers),
                 signHeaders,
                 "UNSIGNED-PAYLOAD"
-                ].joined(separator: "\n"),
+            ].joined(separator: "\n"),
             updatedURL)
     }
-    
+
     /// Encode and sort queryItems.
     ///
     /// - Parameter url: The URL for request containing the possible queryItems.
@@ -344,7 +308,7 @@ public class S3SignerAWS  {
         }
         return ""
     }
-    
+
     /// Signed headers
     ///
     /// - Parameter headers: Headers to sign.
@@ -353,7 +317,7 @@ public class S3SignerAWS  {
         let headerList = Array(headers.keys).map { $0.lowercased() }.filter { $0 != "authorization" }.sorted().joined(separator: ";")
         return headerList
     }
-    
+
     /// Add the required headers to a V4 authorization header request.
     ///
     /// - Parameters:
@@ -362,17 +326,14 @@ public class S3SignerAWS  {
     ///   - longDate: The formatted ISO date.
     ///   - bodyDigest: The payload hash of request.
     /// - Returns: Updated headers with additional required headers.
-    internal func updateHeaders(
-        headers: [String:String],
-        url: URL,
-        longDate: String,
-        bodyDigest: String)
-        -> [String:String]
-    {
+    internal func updateHeaders(headers: [String:String],
+                                url: URL,
+                                longDate: String,
+                                bodyDigest: String) -> [String:String] {
         var updatedHeaders = headers
         updatedHeaders["X-Amz-Date"] = longDate
         updatedHeaders["Host"] = url.host ?? region.host
-        
+
         if bodyDigest != "UNSIGNED-PAYLOAD" && service == "s3" {
             updatedHeaders["x-amz-content-sha256"] = bodyDigest
         }
