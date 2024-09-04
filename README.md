@@ -1,15 +1,13 @@
 # S3SignerAWS
 
-[![codecov](https://codecov.io/gh/JustinM1/S3SignerAWS/branch/master/graph/badge.svg)](https://codecov.io/gh/JustinM1/S3SignerAWS)
-[![Build Status](https://app.bitrise.io/app/cf5b884ca2181b4c/status.svg?token=QM_jU5_3BEQRmt0OmdVwJw&branch=master)](https://app.bitrise.io/app/cf5b884ca2181b4c)
-[![CircleCI](https://circleci.com/gh/JustinM1/S3SignerAWS.svg?style=svg)](https://circleci.com/gh/JustinM1/S3SignerAWS)
-[![Codacy Badge](https://api.codacy.com/project/badge/Grade/2a752fec330b42299f4425448cfee76e)](https://www.codacy.com/app/JustinM1/S3SignerAWS?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=JustinM1/S3SignerAWS&amp;utm_campaign=Badge_Grade)
-<img src="http://img.shields.io/badge/Swift-5.0-blue.svg?style=plastic" alt="Swift 5.0"/>
+## ⚠️ No support is provided for this package ⚠️
 
+This is a fork of a no-longer maintained library. Neither the original author, nor the owner of this repository will
+provide any support at all for using this. Use at your own risk, and please don't file issues or ask for help.
 
-Generates V4 authorization headers and pre-signed URLs for authenticating AWS S3 REST API calls
+## Description
 
-Check out [VaporS3Signer](https://github.com/JustinM1/VaporS3Signer.git) if your using `Vapor`.
+Generates V4 authorization headers and pre-signed URLs for authenticating AWS S3 REST API calls.
 
 ### Features
 - [x] Pure Swift
@@ -30,14 +28,14 @@ Check out [VaporS3Signer](https://github.com/JustinM1/VaporS3Signer.git) if your
 **Swift Package Manager**
 
 To install with swift package manager, add the package to your `Package.swift` file:
-```ruby
+```swift
 Import PackageDescription
 
   let package = Package(
     name: "Your_Project_Name",
     targets: [],
     dependencies: [
-        .package(url: "https://github.com/JustinM1/S3SignerAWS.git", from: "4.0.0")
+        .package(url: "https://github.com/armadsen/S3SignerAWS.git", from: "4.0.0")
     ]
   )  
   ```
@@ -51,7 +49,7 @@ Requests can either have a signed payload or an unsigned payload.
 * If you are not sure what the exact payload will be, set payload property to unsigned. This tells s3 when you made the signature, there was a possibility of a payload but you weren't sure what specific object will be uploaded.
 * `Payload` enum:
 
-    ```ruby
+    ```swift
     public enum Payload {
       case data(Data)
       case none
@@ -60,7 +58,7 @@ Requests can either have a signed payload or an unsigned payload.
     ```
 To begin working with the S3SignerAWS class, initialize an instance similar to example shown below:
 
-```ruby
+```swift
 let s3Signer = S3SignerAWS(accessKey: "YOUR_AWS_PUBLIC_KEY", secretKey: "YOUR_AWS_SECRET_KEY", region: .usStandard_usEast1)  
 ```
 **NOTE -** Hardcoding Secret Keys on client is _not_ recommended for security reasons.
@@ -70,7 +68,7 @@ For both V4 Authorization Header and Pre-Signed URL, you can add additional head
 
 GET
 
-```ruby
+```swift
 do {
   guard let url = URL(string: "https://s3.amazonaws.com/bucketName/testUploadImage.png") else { throw someError }
   let headers = try s3Signer.authHeaderV4(httpMethod: .get, urlString: url.absoluteString, headers: [:], payload: .none)          
@@ -85,7 +83,7 @@ do {
   ```
 PUT
 
-```ruby
+```swift
 do {
   let bytesObject = try someDataObject.makeBytes()
   guard let url = URL(string: "https://s3.amazonaws.com/bucketName/testUploadImage.png") else { throw someError }
@@ -102,7 +100,7 @@ do {
   ```
 DELETE
 
-```ruby
+```swift
 do {
   guard let url = URL(string: "https://s3.amazonaws.com/bucketName/testUploadImage.png") else { throw someError }
   let headers = try s3Signer.authHeadersV4(httpMethod: .delete, urlString: url.absoluteString, headers: [:], payload: .none)
@@ -119,6 +117,6 @@ do {
 ### V4 Pre-Signed URL
 
 Similar to the ease of generating authentication headers, to generate a pre-signed url:
-```ruby
+```swift
 let presignedURL = signer.presignedURLV4(httpMethod: HTTPMethod, urlString: String, expiration: TimeFromNow, headers: [String: String]) -> String
   ```
